@@ -26,7 +26,7 @@ cdef class MorphogenGrid:
     cpdef void setV(self, int x, int y, int z, double v) except *:
         self.V[x+1, y+1, z+1] = v
 
-    cpdef double[:,:,:] gray_scott(self, int steps, int[:,:,:] mask) except *:
+    cpdef double[:,:,:] gray_scott(self, int steps, unsigned char[:,:,:] mask) except *:
         cdef int x, y, z
         cdef double uvv, u, v, lapU, lapV
         cdef double FK = self.F + self.K

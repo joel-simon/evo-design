@@ -7,4 +7,4 @@ cdef class MorphogenGrid:
     cdef public double[:,:,:] U, V, dU, dV
 
     cpdef void setV(self, int x, int y, int z, double v) except *
-    cpdef double[:,:,:] gray_scott(self, int steps, int[:,:,:] mask) except *
+    cpdef double[:,:,:] gray_scott(self, int steps, unsigned char[:,:,:] mask) except *

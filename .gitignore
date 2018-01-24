@@ -1,3 +1,6 @@
 build/
 outputs/
+evo_design/__pycache__/
+evo_design/*.html
+*.prof
 *.so

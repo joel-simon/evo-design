@@ -1,6 +1,7 @@
-import sys
+import sys, os
 import numpy as np
-from viewer import Viewer
+sys.path.append(os.path.abspath('.'))
+from evo_design.viewer import Viewer
 
 target = np.ones((9, 9, 9), dtype='uint8')
 r = 3

@@ -1,5 +1,6 @@
-import os, sys, time
+import os, sys, time, random, string
 import numpy as np
+from datetime import datetime
 import MultiNEAT as NEAT
 sys.path.append(os.path.abspath('.'))
 from evo_design.map_utils import largest_contiguous
@@ -37,7 +38,7 @@ def addTrait(params, name, vrange, ttype='float'):
     }
     params.SetGenomeTraitParameters(name, trait)
 
-def optimize_neat(config, n_inputs, n_hidden, n_outputs):
+def optimize_neat(config, n_inputs, n_hidden, n_outputs, out_dir):
     print('Starting Optimization')
     params = NEAT.Parameters()
     params.PopulationSize = 60
@@ -84,16 +85,22 @@ def optimize_neat(config, n_inputs, n_hidden, n_outputs):
             top_fitness = max_fitness
             top_grid = best_grid
 
-            np.save('outputs/grid_%i' % generation, best_grid)
-            best_genome.Save('outputs/genome_%i' % generation)
+            np.save(out_dir+'/grid_%i' % generation, best_grid)
+            best_genome.Save(out_dir+'/genome_%i' % generation)
 
         pop.Epoch()
         print()
 
+def generate_id(n):
+    options = string.ascii_uppercase + string.digits
+    return ''.join(random.choice(options) for _ in range(n))
+
 def main(config):
     assert config['shape'] == config['target'].shape
 
-    os.mkdir('outputs')
+    rid = generate_id(4)
+    dir_name = 'outputs/' + rid +"__{:%B_%d_%Y_%H_%M}".format(datetime.now())
+    os.makedirs(dir_name)
 
     # Base inputs are n_neighbors and bias.
     in_per_morph = (config['morphogen_thresholds']-1)
@@ -102,10 +109,10 @@ def main(config):
     # Base outputs are 6 growth directions and apoptosis.
     n_outputs = 7 + config['n_memory'] + config['n_signals'] + config['n_morphogens']
 
-    optimize_neat(config, n_inputs, n_hidden, n_outputs)
+    optimize_neat(config, n_inputs, n_hidden, n_outputs, dir_name)
 
 target = np.ones((9, 9, 9), dtype='uint8')
-r = 3
+r = target.shape[0] // 3
 target[r:-r, :, r:-r] = 0
 target[:, r:-r, r:-r] = 0
 target[r:-r, r:-r, :] = 0
@@ -113,13 +120,13 @@ target[r:-r, r:-r, :] = 0
 main({
     'target': target,
     'generations': 100,
-    'steps': 100,
+    'steps': 50,
     'shape': (9, 9, 9),
     'seed_shape': (5, 5, 5),
     'n_memory': 2,
     'n_signals': 2,
-    'n_morphogens':2,
-    'morphogen_thresholds': 3,
+    'n_morphogens': 0,
+    'morphogen_thresholds': 2,
     'max_stagnation': 5,
     'fitness_bar_period': 25,
     'neat_params_path': 'neatconfig.txt',

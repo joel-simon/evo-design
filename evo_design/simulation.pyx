@@ -1,10 +1,17 @@
+# cython: boundscheck=False
+# cython: wraparound=False
+# cython: initializedcheck=False
+# cython: nonecheck=False
+# cython: cdivision=True
+
 import pickle
 import time
 import math
 import numpy as np
 from evo_design.morphogens import MorphogenGrid
 
-def calulate_neighbors(grid, neighbors):
+cdef void calulate_neighbors(unsigned char[:,:,:] grid, unsigned char[:,:,:] neighbors):
+    cdef int x, y, z
     for x in range(1, grid.shape[0]-1):
         for y in range(1, grid.shape[1]-1):
             for z in range(1, grid.shape[2]-1):
@@ -12,24 +19,33 @@ def calulate_neighbors(grid, neighbors):
                                      grid[x, y-1, z] + grid[x, y+1, z] + \
                                      grid[x, y, z-1] + grid[x, y, z+1]
 
-def run_simulation(network, net_depth, traits, config, fitness):
+cpdef object run_simulation(network, int net_depth, dict traits, config, fitness):
     assert net_depth > 0
+    cdef int nx, ny, nz, x, y, z, i, step, n_growth, n_death, input_indx, max_i, out_indx, mbin
+    cdef double max_o
     nx, ny, nz = config['shape']
 
-    n_signals = config['n_signals']
-    n_memory = config['n_memory']
-    n_morphogens = config['n_morphogens']
-    morphogen_thresholds = config['morphogen_thresholds']
+    cdef int num_inputs = network.NumInputs()
+    cdef int num_outputs = network.NumOutputs()
+    cdef int n_signals = config['n_signals']
+    cdef int n_memory = config['n_memory']
+    cdef int n_morphogens = config['n_morphogens']
+    cdef int morphogen_thresholds = config['morphogen_thresholds']
 
-    grid = np.zeros((nx+2, ny+2, nz+2), dtype='i')
-    grid_memory = np.zeros((nx+2, ny+2, nz+2, config['n_memory']))
-    signals = np.zeros((nx+2, ny+2, nz+2, config['n_signals']))
-    neighbors = np.zeros((nx+2, ny+2, nz+2), dtype='uint8')
+    cdef unsigned char[:,:,:] grid = np.zeros((nx+2, ny+2, nz+2), dtype='uint8')
+    cdef unsigned char[:,:,:] neighbors = np.zeros((nx+2, ny+2, nz+2), dtype='uint8')
+    cdef double[:,:,:,:] grid_memory = np.zeros((nx+2, ny+2, nz+2, config['n_memory']))
+    cdef double[:,:,:,:] signals = np.zeros((nx+2, ny+2, nz+2, config['n_signals']))
+    cdef double[:,:,:,:] outputs = np.zeros((nx+2, ny+2, nz+2, num_outputs))
+    cdef double[:] output
+    cdef double[:] inputs = np.zeros(num_inputs)
+    cdef int[:,:] directions = np.array([[0, 0, 1], [0, 0, -1], [0, 1, 0],
+                                         [0, -1, 0],[1, 0, 0], [-1, 0, 0]], dtype='i')
+    cdef int[:] d
+    cdef object network_out
+    cdef unsigned char[:,:,:] mask = np.ones_like(grid)
 
-    inputs = np.zeros(network.NumInputs())
-    outputs = np.zeros((nx+2, ny+2, nz+2, network.NumOutputs()))
-
-    morphogens = []
+    cdef list morphogens = []
     for i in range( config['n_morphogens'] ):
         F = traits[ 'F%i'%i ]
         K = traits[ 'K%i'%i ]
@@ -37,15 +53,14 @@ def run_simulation(network, net_depth, traits, config, fitness):
         diffV = traits[ 'diffV%i'%i ]
         morphogens.append( MorphogenGrid(nx, ny, nz, diffU, diffV, F, K) )
 
-
     grid[3:-3, 3:-3, 3:-3] = 1
 
-    stagnation = 0
+    cdef int stagnation = 0
     for step in range(config['steps']):
         ###################### Update Simulation #######################
         calulate_neighbors(grid, neighbors)
         for morphogen in morphogens:
-            morphogen.gray_scott(200, grid)
+            morphogen.gray_scott(200, mask)
 
         n_growth = 0
         n_death = 0
@@ -57,12 +72,11 @@ def run_simulation(network, net_depth, traits, config, fitness):
                     if grid[ x, y, z ] == 0:
                         continue
 
-                    inputs.fill(0)
+                    inputs[:] = 0
 
                     ############################################################
                     # Basic Inputs
-                    n_neighbors = neighbors[x, y, z]
-                    inputs[0] = n_neighbors / 6.0
+                    inputs[0] = neighbors[x, y, z] / 6.0
                     input_indx = 1
 
                     # Memory
@@ -88,18 +102,23 @@ def run_simulation(network, net_depth, traits, config, fitness):
 
                     ############################################################
 
-                    assert input_indx == network.NumInputs()-1, (input_indx, network.NumInputs())
+                    # assert input_indx == num_inputs-1, (input_indx, network.NumInputs())
+                    # assert len(inputs.shape) == 1, inputs.shape
+                    # assert inputs.shape[0] == num_inputs
 
-                    inputs = (inputs*2)-1 # Map [0, 1] --> [-1, 1]
+                    for i in range(inputs.shape[0]):
+                        inputs[i] = (inputs[i]*2)-1 # Map [0, 1] --> [-1, 1]
                     inputs[input_indx] = 1 # Bias
 
                     network.Flush()
-                    network.Input(inputs)  # can input numpy arrays, too
+                    network.Input(list(inputs))  # can input numpy arrays, too
 
                     for _ in range(net_depth):
                         network.ActivateFast()
 
-                    outputs[x, y, z] = network.Output()
+                    network_out = network.Output()
+                    for i in range(num_outputs):
+                        outputs[x, y, z, i] = network_out[i]
 
         ########################################################################
         # Kill cells. So that cells can grow into ones that die that same step.
@@ -108,12 +127,10 @@ def run_simulation(network, net_depth, traits, config, fitness):
                 for z in range(nz):
                     if grid[x, y, z] and outputs[x, y, z, 6] > .75:
                         grid[x, y, z] = 0
-                        grid_memory[x, y, z] = 0
+                        grid_memory[x, y, z, :] = 0
                         n_death += 1
 
         ############################# Act On Outputs ###########################
-        directions = np.array([[0, 0, 1], [0, 0, -1], [0, 1, 0],
-                               [0, -1, 0],[1, 0, 0], [-1, 0, 0]])
         for x in range(nx):
             for y in range(ny):
                 for z in range(nz):
@@ -162,5 +179,5 @@ def run_simulation(network, net_depth, traits, config, fitness):
             if fitness(grid[1:-1, 1:-1, 1:-1]) < (step / float(config['steps'])):
                 break
 
-    return grid[1:-1, 1:-1, 1:-1]
+    return np.asarray(grid[1:-1, 1:-1, 1:-1], dtype='uint8')
 
